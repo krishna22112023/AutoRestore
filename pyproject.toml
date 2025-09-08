@@ -1,0 +1,67 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "autorestore"
+version = "0.0.0"
+description = "auto image restoration agent"
+readme = "README.md"
+requires-python = "==3.10.12"
+dependencies = [
+    "httpx",
+    "python-dotenv",
+    "fastapi",
+    "uvicorn",
+    "pandas",
+    "numpy<2",
+    "pyprojroot",
+    "opencv-contrib-python",
+    "torch",
+    "torchvision",
+    "transformers",
+    "accelerate",
+    "sentencepiece",
+    "diffusers",
+    "bitsandbytes",
+    "dashscope"]
+
+[project.optional-dependencies]
+dev = [
+    "black>=24.2.0",
+]
+test = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-v --cov=src --cov-report=term-missing"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.black]
+line-length = 88
+target-version = ["py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+# A regex preceded with ^/ will apply only to files and directories
+# in the root of the project.
+^/build/
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url  = "https://download.pytorch.org/whl/cu126"
+explicit = true   # only install pkgs you explicitly map to this index
+
+[tool.uv.sources]
+torch       = { index = "pytorch-cu126" }
+torchvision = { index = "pytorch-cu126" }
+'''

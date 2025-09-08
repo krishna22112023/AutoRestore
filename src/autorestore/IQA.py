@@ -4,7 +4,13 @@ from typing import Optional
 from pathlib import Path
 import logging
 import requests
+import pyprojroot
+import sys
 
+root = pyprojroot.find_root(pyprojroot.has_dir("src"))
+sys.path.append(str(root))
+
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -56,7 +62,7 @@ class DepictQA:
             "motion blur",
             "defocus blur",
             "rain",
-            "raindrop",
+            "low resolution",
             "haze",
             "dark",
             "noise",
@@ -83,7 +89,7 @@ class DepictQA:
             logger.info(f"Re-evaluating degradations for {img.name} with prompt: {previous_plan}")
         else:
             depictqa_evaluate_degradation_prompt = open(f"{root}/src/prompts/depictqa_eval.md").read()
-            logger.info(f"Evaluating degradation for {img.name} with prompt: {depictqa_evaluate_degradation_prompt}")
+            logger.info(f"Evaluating degradation for {img.name}")
         for degradation in degradations_lst:
             if replan:
                 prompt = depictqa_evaluate_degradation_prompt.format(

@@ -53,7 +53,7 @@ class Executor:
         self.num_workers = num_workers
         self.model_type = model_type
         self.batch = batch
-        self.qwen = QwenImageEdit(use_qwenapi=use_qwen_api)
+        self.qwen = QwenImageEdit(use_qwen_api=use_qwen_api)
         self.use_qwen_api = use_qwen_api
 
         # Load artefacts

@@ -49,7 +49,7 @@ class Planning:
         self.depictqa = DepictQA()
         self.qalign = QAlign()
         self.vit = ViT()    
-        self.qwen = QwenImageEdit(use_qwenapi=use_qwen_api)
+        self.qwen = QwenImageEdit(use_qwen_api=use_qwen_api)
         self.use_qwen_api = use_qwen_api
         
 
@@ -66,9 +66,9 @@ class Planning:
         filtering is applied at this stage.
         """
         logger.info("Running image-quality analysis with DepictQA…")
-
         ext = ("*.jpg", "*.jpeg", "*.png")
         image_paths_all = [p for pattern in ext for p in self.data_path.glob(pattern)]
+        logger.info(f"Found {len(image_paths_all)} images in {self.data_path}")
         if images_subset is not None:
             names_set = set(images_subset)
             image_paths = [p for p in image_paths_all if p.name in names_set]
@@ -93,8 +93,10 @@ class Planning:
                     previous_plan=prev_plan_str,
                 )
             except Exception as e:  
-                logger.warning("DepictQA failed for %s: %s", img_path.name, e)
+                logger.error("DepictQA failed for %s: %s", img_path.name, e)
+                sys.exit(1)
                 res = []
+                
 
             # Store full list – keep DepictQA wording intact
             per_image[img_path.name] = res

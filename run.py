@@ -3,9 +3,12 @@ from typing import List, Dict
 import pyprojroot
 import sys
 import logging
+import os
+from dotenv import load_dotenv
 
 root = pyprojroot.find_root(pyprojroot.has_dir("src"))
 sys.path.append(str(root))
+load_dotenv(os.path.join(root,".env"))
 
 from src.utils.file import write_json, read_json
 from src.autorestore.planner import Planning
