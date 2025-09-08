@@ -10,6 +10,9 @@ readme = "README.md"
 requires-python = "==3.10.12"
 dependencies = [
     "httpx",
+    "pytest",
+    "pydantic_settings",
+    "python-json-logger",
     "python-dotenv",
     "fastapi",
     "uvicorn",

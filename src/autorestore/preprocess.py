@@ -11,21 +11,44 @@ root = pyprojroot.find_root(pyprojroot.has_dir("src"))
 from dashscope import MultiModalConversation
 
 from src.utils.image_processing import resize_image, encode_file
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+from config import logger, settings
 
 class QwenImageEdit:
-    def __init__(self, host: str = "127.0.0.1", port: int = 5005, use_qwen_api: bool = True):
-        if use_qwen_api:
+    """Wrapper around Qwen Image Edit API or local HF model.
+
+    Parameters default to values specified in *config/base.yaml* under
+    ``executor.preprocess`` but can still be overridden explicitly.
+    """
+
+    def __init__(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        use_api: bool | None = None,
+        inference_steps: int | None = None,
+        true_cfg_scale: float | None = None,
+        name: str | None = None,
+        default_size: tuple[int, int] | None = None,
+        device_map: str | None = None,
+    ):
+        
+        if use_api:
             dashscope.base_http_api_url = 'https://dashscope-intl.aliyuncs.com/api/v1'
+            self.name = name
         else:
+            host = host or _prep_cfg.get("host", "127.0.0.1")
+            port = port or int(_prep_cfg.get("port", 5005))
             self.url = f"http://{host}:{port}/qwen_edit"
+            self.hf_name = name
+            self.default_size = default_size
+            self.device_map = device_map
+            self.inference_steps = inference_steps
+            self.true_cfg_scale = true_cfg_scale
     
-    def query_local(self, image_path: str, degradation_type: str, severity: str, inference_steps: int, true_cfg_scale: float, negative_prompt: Optional[str], output_path: str) -> float:
+    def query_local(self, image_path: str, degradation_type: str, severity: str, output_path: str) -> float:
         resp = requests.post(self.url, json={"image_path":image_path, "degradation_type":degradation_type, 
-        "severity":severity, "inference_steps":inference_steps, "true_cfg_scale":true_cfg_scale, "negative_prompt":negative_prompt, "output_path":output_path})
+        "severity":severity, hf_name = self.hf_name, "default_size":self.default_size,"device_map":self.device_map,
+        "inference_steps":self.inference_steps, "true_cfg_scale":self.true_cfg_scale,  "output_path":output_path})
         resp.raise_for_status()
         duration = resp.json()["duration"]
         return duration
@@ -44,12 +67,12 @@ class QwenImageEdit:
                 ]
             }
         ]
-        api_key = os.getenv("DASHSCOPE_API_KEY")
+        api_key = settings.DASHSCOPE_API_KEY
         logger.info("processing image using qwen-image-edit API")
         start_time = time()
         response = MultiModalConversation.call(
             api_key=api_key,
-            model="qwen-image-edit",
+            model=self.name,
             messages=messages,
             result_format='message',
             stream=False,

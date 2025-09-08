@@ -5,7 +5,6 @@ from itertools import permutations
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from collections import defaultdict
 import json
-import logging
 import os
 import random
 import shutil
@@ -20,9 +19,8 @@ from src.autorestore.IQA import DepictQA, QAlign, ViT
 from src.autorestore.preprocess import QwenImageEdit
 from src.autorestore.metrics import restoration_score
 from src.utils.file import ensure_dir, write_json, read_json
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from config.run_config import load_config
+from config import logger
 
 class Planning:
     """Implements the *Planning* stage of AutoRestore.
@@ -38,25 +36,49 @@ class Planning:
         Degree of parallelism when running *qwen_preprocess*.
     """
 
-    SEVERITY_ORDER = ["very low", "low", "medium", "high", "very high"]
-    SEVERITY_THRESHOLD = {"medium", "high", "very high"}
+    def __init__(self, config: dict) -> None:
+        logger.info("Starting planning stage")
+        # Load global configuration once
+        planner_config = config.get("planner", {})
+        iqa_config = planner_config.get("IQA", {})
+        self.severity = iqa_config.get("severity", {"very low", "low", "medium", "high", "very high"})
+        self.severity_threshold = set(map(str.lower, iqa_config.get("severity_threshold", ["medium", "high", "very high"])))
+        self.degradations = iqa_config.get(
+            "degradations",
+            [
+                "motion blur",
+                "defocus blur",
+                "rain",
+                "haze",
+                "dark",
+                "noise",
+                "jpeg compression artifact",
+            ],
+        )
+        self.enable = planner_config.get("enable", True)
+        self.max_degradations = iqa_config.get("max_degradations", 3)
+        self._lambda = planner_config.get("score", {}).get("lambda", 0.5)
+        self.optimize_pipeline = planner_config.get("optimize_pipeline", True)
+        self.batch_by_degradation = planner_config.get("batch_by_degradation", True)
+        logger.info(f"enable : {self.enable}, optimize_pipeline : {self.optimize_pipeline}, max_degradations : {self.max_degradations}, ")
+        logger.info(f"Planning configuration: Detecting degradations : {self.degradations}, severity : {self.severity}, filter by severity {self.severity_threshold}")
 
-    def __init__(self, data_path: str | Path, artefacts_path: str | Path, *, num_workers: int = 4, use_qwen_api: bool = True) -> None:
-        self.data_path = Path(root / data_path)
-        self.artefacts_path = Path(root / artefacts_path)
-        self.num_workers = num_workers
+        #initialize paths and models
+        general_config = config.get("general", {})
+        self.data_path = Path(root / general_config.get("data_path", "data/raw"))
+        self.artefacts_path = Path(root / general_config.get("artefacts_path", "data/artefacts"))
+        self.num_workers = general_config.get("num_workers", 4)
         ensure_dir(self.artefacts_path)
         self.depictqa = DepictQA()
         self.qalign = QAlign()
         self.vit = ViT()    
-        self.qwen = QwenImageEdit(use_qwen_api=use_qwen_api)
-        self.use_qwen_api = use_qwen_api
+        preprocess_config = config.get("executor", {}).get("preprocess", {})
+        self.qwen = QwenImageEdit(use_api=preprocess_config.get("use_api", True),name=preprocess_config.get("name", "qwen-edit"))
+        self.use_api = preprocess_config.get("use_api", True)
         
-
     def image_quality_analysis(
         self,
         images_subset: List[str] | None = None,
-        *,
         replan: bool = False,
         previous_plans: Dict[str, str] | None = None,
     ) -> None:
@@ -82,16 +104,26 @@ class Planning:
 
         for img_path in image_paths:
             try:
-                prev_plan_str = None
-                if replan and previous_plans is not None:
-                    prev_plan_str = previous_plans.get(img_path.name)
-                # DepictQA returns (prompt, list[(degradation, level), …])
-                _, res = self.depictqa.query(
-                    [img_path],
-                    "eval_degradation",
-                    replan=replan,
-                    previous_plan=prev_plan_str,
-                )
+                if self.enable:
+                    logger.info("Planning is enabled – running DepictQA.")
+                    prev_plan_str = None
+                    if replan and previous_plans is not None:
+                        prev_plan_str = previous_plans.get(img_path.name)
+                    # DepictQA returns (prompt, list[(degradation, level), …])
+                    _, res = self.depictqa.query(
+                        [img_path],
+                        "eval_degradation",
+                        replan=replan,
+                        previous_plan=prev_plan_str,
+                    )
+                else:
+                    logger.info("Planning is disabled – randomly generating degradation-severity pairs.")
+                    # Planning is disabled – randomly generate degradation-severity pairs
+                    # Select up to *max_degradations* unique degradations from the configured list
+                    deg_choices = random.sample(self.degradations, k=min(self.max_degradations, len(self.degradations)))
+                    sev_list = list(self.severity)
+                    res = [(d, random.choice(sev_list)) for d in deg_choices]
+
             except Exception as e:  
                 logger.error("DepictQA failed for %s: %s", img_path.name, e)
                 sys.exit(1)
@@ -116,46 +148,33 @@ class Planning:
     def batch_creation(self, per_image: Dict[str, List[Tuple[str, str]]]) -> None:
         """Generate *batch_IQA.json* where keys are unique degradation combos (≤3)."""
 
-        all_degradations = [
-            "motion blur",
-            "defocus blur",
-            "rain",
-            "raindrop",
-            "haze",
-            "dark",
-            "noise",
-            "jpeg compression artifact",
-        ]
-
         from itertools import combinations
 
         def _key_from_combo(combo: Tuple[str, ...]) -> str:
             return "-".join(sorted(d.replace(" ", "_") for d in combo))
 
-        # Initialise dictionary with *all* possible combos (92 keys)
+        # Initialise dictionary with *all* possible combos
         batch_dict: Dict[str, List[str]] = {
             _key_from_combo(c): []
-            for r in (1, 2, 3)
-            for c in combinations(all_degradations, r)
+            for r in range(1, self.max_degradations + 1)
+            for c in combinations(self.degradations, r)
         }
-
-        severity_rank = {"very high": 3, "high": 2, "medium": 1}
 
         for img_name, deg_list in per_image.items():
             # Filter degradations by severity ≥ medium
             valid: List[Tuple[str, str]] = [
-                (d, s.lower()) for d, s in deg_list if s.lower() in severity_rank
+                (d, s.lower()) for d, s in deg_list if s.lower() in self.severity_threshold
             ]
             if not valid:
                 continue  # skip images without significant degradation
 
             # Sort by severity rank desc, keep unique degradation names
-            valid_sorted = sorted(valid, key=lambda x: -severity_rank[x[1]])
+            valid_sorted = sorted(valid, key=lambda x: -self.severity_threshold[x[1]])
             unique_deg = []
             for d, _ in valid_sorted:
                 if d not in unique_deg:
                     unique_deg.append(d)
-                if len(unique_deg) == 3:
+                if len(unique_deg) == self.max_degradations:
                     break
 
             key = _key_from_combo(tuple(unique_deg))
@@ -167,8 +186,6 @@ class Planning:
 
     def batch_process(
         self,
-        *,
-        num_workers: int | None = None,
         batch_process: bool = True,
         replan: bool = False,
     ) -> None:
@@ -181,7 +198,7 @@ class Planning:
             logger.info("batch_process flag is False – skipping exhaustive search.")
             return
 
-        num_workers = num_workers or self.num_workers
+        num_workers = self.num_workers
         batch_file = self.artefacts_path / "batch_IQA.json"
         if not batch_file.exists():
             raise FileNotFoundError(f"{batch_file} not found. Run image_quality_analysis first.")
@@ -189,8 +206,33 @@ class Planning:
         # Load the mapping of degradation-combo → image list
         batches: Dict[str, List[str]] = read_json(batch_file)
 
-        pipeline_file = self.artefacts_path / "batch_pipeline.json"
+        # If pipeline optimization is disabled, randomly assign an order for each degradation combo
+        if not self.optimize_pipeline:
+            logger.info("optimize_pipeline flag is False – generating random pipelines instead of exhaustive search.")
+            best_pipelines: Dict[str, List[str]] = {}
+
+            for degradation_id, _ in batches.items():
+                # Reuse existing pipeline if we're not replanning and it exists already
+                if (not replan) and (degradation_id in existing_pipelines):
+                    best_pipelines[degradation_id] = existing_pipelines[degradation_id]
+                    continue
+
+                # Derive degradation list from the degradation_id key and shuffle it
+                degradation_types = [d.replace("_", " ") for d in degradation_id.split("-")]
+                random.shuffle(degradation_types)
+                best_pipelines[degradation_id] = degradation_types
+
+            # Merge with untouched existing pipelines and persist results
+            final_pipelines = {**existing_pipelines, **best_pipelines}
+            out_path = self.artefacts_path / "batch_pipeline.json"
+            write_json(final_pipelines, out_path)
+            logger.info("batch_pipeline.json written to %s", out_path)
+            return  # Skip the optimization branch entirely
+
+        # If pipeline optimization is enabled, perform exhaustive search
+        logger.info("optimize_pipeline flag is True – performing exhaustive search.")
         existing_pipelines: Dict[str, List[str]] = {}
+        pipeline_file = self.artefacts_path / "batch_pipeline.json"
         if pipeline_file.exists():
             try:
                 existing_pipelines = read_json(pipeline_file)
@@ -256,8 +298,7 @@ class Planning:
         self,
         degradation_id: str,
         img_path: Path,
-        img_deg_list: List[Tuple[str, str]],
-        gamma: float = 0.5,
+        img_deg_list: List[Tuple[str, str]]
     ) -> List[str] | None:
         """Enumerate all permutations of the degradation list and return the best sequence."""
         degradation_types = [d.replace("_", " ") for d in degradation_id.split("-")]
@@ -274,16 +315,16 @@ class Planning:
                 severity = severity_map[degradation]
                 tmp_out_dir = self.artefacts_path / "tmp_planning" / degradation_id / "_".join(perm)
                 ensure_dir(tmp_out_dir)
-                if self.use_qwen_api:
+                if self.use_api:
                     self.qwen.query_api(str(current_img_path), degradation, severity, str(tmp_out_dir))
                 else:
-                    self.qwen.query_local(str(current_img_path), degradation, severity, 20, 9.0, " ", str(tmp_out_dir))
+                    self.qwen.query_local(str(current_img_path), degradation, severity, str(tmp_out_dir))
                 next_img = tmp_out_dir / f"{current_img_path.name}-{degradation}-{severity}.jpg"
                 current_img_path = next_img
 
             # Finished the pipeline – compute quality score
             try:
-                score = restoration_score(img_path, current_img_path, self.vit, self.qalign, gamma)
+                score = restoration_score(img_path, current_img_path, self.vit, self.qalign, self._lambda)
             except Exception:
                 score = -float("inf")
             if score > best_score:

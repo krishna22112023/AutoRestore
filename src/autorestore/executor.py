@@ -1,20 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-import logging
 import shutil
 from typing import Dict, List, Tuple
 import pyprojroot
 import sys
+import os
 
 root = pyprojroot.find_root(pyprojroot.has_dir("src"))
 sys.path.append(str(root))
 
 from src.autorestore.preprocess import QwenImageEdit
 from src.utils.file import ensure_dir, read_json
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from config.run_config import load_config
+from config import logger
 
 class Executor:
     """Apply the optimal pipelines discovered by :class:`Planning`.
@@ -36,25 +35,33 @@ class Executor:
 
     def __init__(
         self,
-        data_path: str | Path,
-        artefacts_path: str | Path,
-        processed_path: str | Path,
-        *,
-        num_workers: int = 4,
-        model_type: str = "qwen-edit",
-        batch: bool = True,
-        use_qwen_api: bool = True,
-    ) -> None:
-        root_path = root  # from earlier pyprojroot lookup
-        self.data_path = Path(root_path / data_path)
-        self.artefacts_path = Path(root_path / artefacts_path)
-        self.processed_path = Path(root_path / processed_path)
+        config: dict) -> None:
+        logger.info("Starting execution stage")
+        general_config = config.get("general", {})
+        self.data_path = Path(root / general_config.get("data_path", "data/raw"))
+        self.artefacts_path = Path(root / general_config.get("artefacts_path", "data/artefacts"))
+        self.processed_path = Path(root / general_config.get("processed_path", "data/processed"))
         self.processed_path.mkdir(parents=True, exist_ok=True)
-        self.num_workers = num_workers
-        self.model_type = model_type
-        self.batch = batch
-        self.qwen = QwenImageEdit(use_qwen_api=use_qwen_api)
-        self.use_qwen_api = use_qwen_api
+
+        executor_config = config.get("executor", {})
+        preprocess_config = executor_config.get("preprocess", {})
+        self.num_workers = int(config.get("general", {}).get("num_workers", 4))
+        self.batch = bool(executor_config.get("batch", False))
+        self.use_api = bool(preprocess_config.get("use_api", True))
+        self.model_type = preprocess_config.get("name", "qwen-edit")
+
+        if not self.use_api:
+            self.hf_name = preprocess_config.get("hf_name", "Qwen/Qwen-Image-Edit")
+            self.default_size = preprocess_config.get("default_size", (1664, 928))
+            self.device_map = preprocess_config.get("device_map", "balanced")
+            self.inference_steps = preprocess_config.get("inference_steps", 20)
+            self.true_cfg_scale = preprocess_config.get("true_cfg_scale", 9.0)
+            self.qwen = QwenImageEdit(use_api=self.use_api, hf_name=self.hf_name, default_size=self.default_size, device_map=self.device_map, inference_steps=self.inference_steps, true_cfg_scale=self.true_cfg_scale)
+            logger.info(f"using local model {self.hf_name}.")
+            logger.info("This will be slow. For <60s inference speed, please switch to API by setting use_api=True")
+        else:
+            self.qwen = QwenImageEdit(use_api=self.use_api, name=self.model_type)
+            logger.info(f"using api model {self.model_type}")
 
         # Load artefacts
         self.batch_pipeline: Dict[str, List[str]] = read_json(self.artefacts_path / "batch_pipeline.json")
@@ -97,17 +104,17 @@ class Executor:
                 sev = severity_map.get(degradation, "medium")
                 logger.info(f"Step {step_idx+1} of {len(seq)}: Processing {img_name} with degradation {degradation} and severity {sev}")
                 out_dir = tmp_dir
-                if self.use_qwen_api:
+                if self.use_api:
                     self.qwen.query_api(str(current_img_path), degradation, sev, str(out_dir))
                 else:
-                    self.qwen.query_local(str(current_img_path), degradation, sev, 20, 9.0, " ", str(out_dir))
-                # Determine saved image path
+                    self.qwen.query_local(str(current_img_path),degradation,sev,str(out_dir))
                 current_img_path = out_dir / f"{current_img_path.name}-{degradation}-{sev}.jpg"
 
             # Copy / move final image to processed_path with original filename
             final_path = self.processed_path / img_name
             try:
                 shutil.move(str(current_img_path), final_path)
+                logger.info(f"Preprocessed image saved to {final_path}")
             except shutil.Error:
                 # Different filesystem – fallback to copy
                 shutil.copy(str(current_img_path), final_path)
@@ -116,6 +123,9 @@ class Executor:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
         if self.batch:
+            # this will not work for api model since api doesn't support batching
+            logger.warning("Batch processing is not supported for API model. Please set batch=False")
+            return
             # Parallel execution
             from concurrent.futures import ThreadPoolExecutor, as_completed
 

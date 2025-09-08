@@ -1,35 +1,30 @@
 from __future__ import annotations
 
 from pathlib import Path
-import logging
 from typing import Dict, List, Tuple
 import pyprojroot
 import sys
-
 root = pyprojroot.find_root(pyprojroot.has_dir("src"))
 sys.path.append(str(root))
 
 from src.utils.file import ensure_dir, write_json
 from src.autorestore.IQA import QAlign
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-
+from config import logger, settings
 
 class Verifier:
     """Compare raw vs processed images using QAlign."""
 
-    def __init__(
-        self,
-        data_path: str | Path,
-        processed_path: str | Path,
-        artefacts_path: str | Path,
-    ) -> None:
-        base = root
-        self.data_path = Path(base / data_path)
-        self.processed_path = Path(base / processed_path)
-        self.artefacts_path = Path(base / artefacts_path)
+    def __init__(self,config: dict,) -> None:
+        logger.info("Starting verification stage")
+        verifier_config = config.get("verifier", {})
+        self.enable = verifier_config.get("enable", True)
+        if not self.enable:
+            logger.info("Verification stage disabled. verification skipped.")
+            return
+        general_config = config.get("general", {})
+        self.data_path = Path(settings.BASE / general_config.get("data_path", "data/raw"))
+        self.processed_path = Path(settings.BASE / general_config.get("processed_path", "data/processed"))
+        self.artefacts_path = Path(settings.BASE / general_config.get("artefacts_path", "data/artefacts"))
         ensure_dir(self.artefacts_path)
         self.qalign = QAlign()
 
@@ -51,11 +46,11 @@ class Verifier:
                 verify_scores[proc_img.name] = [raw_score, proc_score]
                 logger.info(f"verified {proc_img.name} = raw image score: {raw_score}, processed image score: {proc_score}")
                 if proc_score <= raw_score:
-                    logger.info(f"verification failed for {proc_img.name}. appended to failed list to try again.")
+                    logger.info(f"verification failed for {proc_img.name}. appended to failed list to replan.")
                     failed.append(proc_img.name)
             except Exception as e:
-                logger.error("QAlign processing failed for %s: %s", proc_img.name, e)
-            logger.info(f"verification successful for {proc_img.name}")
+                logger.error("Internal failure during verification %s: %s", proc_img.name, e)
+            logger.info(f"verification passed for {proc_img.name}")
 
         # Save failed list
         failed_path = self.artefacts_path / "failed_IQA.json"

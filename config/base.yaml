@@ -1,0 +1,44 @@
+experiments:
+  # Base configuration – used as template for all experiments
+  base: &base_template
+    general: &general_base
+      data_path: "data/raw"
+      artefacts_path: "data/artefacts"
+      processed_path: "data/processed"
+      max_retries: 3
+      num_workers: 4
+
+    planner: &planner_base
+      enable: true #enable IQA for detecting degradations
+      optimize_pipeline: true #enable exhaustive pipeline order search
+      IQA: 
+        model: depictqa #model for degradation and severity detection
+        severity: {"very low", "low", "medium", "high", "very high"}
+        severity_threshold: {"medium", "high", "very high"} #only select degradation of severity greater than or equal to medium
+        degradations: [
+          "motion blur", "defocus blur", "rain",
+          "haze", "dark", "noise", "jpeg compression artifact"
+        ]
+        max_degradations: 3
+      batch_by_degradation: true #batch by degradation type
+      score: 
+        type : "restoration_score" # lambda * cos_sim + (1-lambda) * qalign_score
+        lambda: 0.5
+        distance_metric: "cos_sim"
+
+    executor: &executor_base
+      enable: true 
+      batch: false
+      preprocess: 
+        use_api: true
+        name: "qwen-image-edit"
+        include_severity: true #if false then it does not include severity in the prompt
+        #the following are default values if use_api is false
+        hf_name: "Qwen/Qwen-Image-Edit"
+        default_size: (1664, 928)
+        device_map: "balanced"
+        inference_steps: 20
+        true_cfg_scale: 9.0
+
+    verifier: &verifier_base
+      enable: true

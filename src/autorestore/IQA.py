@@ -34,6 +34,9 @@ class ViT:
 
 class DepictQA:
     """Parameters when called: img_path_lst, task (eval_degradation or comp_quality), degradations (if task is eval_degradation)."""
+    def __init__(self,degradations, severity):
+        self.degradations = degradations
+        self.severity = severity
 
     def query(
         self,
@@ -58,16 +61,7 @@ class DepictQA:
     def eval_degradation(
         self, img: Path, degradation: Optional[str], replan: bool = False, previous_plan: Optional[str] = None
     ) -> tuple[str, list[tuple[str, str]]]:
-        all_degradations: list[str] = [
-            "motion blur",
-            "defocus blur",
-            "rain",
-            "low resolution",
-            "haze",
-            "dark",
-            "noise",
-            "jpeg compression artifact",
-        ]
+        all_degradations: list[str] = self.degradations
         if degradation is None:
             degradations_lst = all_degradations
         else:
@@ -82,7 +76,7 @@ class DepictQA:
                 ), f"Unexpected degradation: {degradation}"
             degradations_lst = [degradation]
 
-        levels: set[str] = {"very low", "low", "medium", "high", "very high"}
+        levels: set[str] = self.severity
         res: list[tuple[str, str]] = []
         if replan:
             depictqa_evaluate_degradation_prompt = open(f"{root}/src/prompts/depictqa_eval_replan.md").read()
@@ -128,3 +122,9 @@ class DepictQA:
             raise ValueError(f"Unexpected answer from DepictQA: {rsp}")
 
         return prompt, choice
+
+if __name__ == "__main__":
+    degradations = ["motion blur", "defocus blur", "rain", "haze", "dark", "noise", "jpeg compression artifact"]
+    severity = {"very low", "low", "medium", "high", "very high"}
+    depictqa = DepictQA(degradations, severity)
+    print(depictqa.query([Path("/home/krishna/workspace/AutoRestore/data/raw/rain_storm-022.jpg")], "eval_degradation"))
