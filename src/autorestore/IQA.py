@@ -193,9 +193,31 @@ class DepictQA:
         return prompt, choice
 
 if __name__ == "__main__":
-    '''degradations = ["motion blur", "defocus blur", "rain", "haze", "dark", "noise", "jpeg compression artifact"]
-    severity = {"very low", "low", "medium", "high", "very high"}
-    depictqa = DepictQA(degradations, severity)
-    print(depictqa.query([Path("/home/krishna/workspace/AutoRestore/data/raw/rain_storm-022.jpg")], "eval_degradation")) '''
-    nr_iqa = NR_IQA()
-    print(nr_iqa.query("/home/krishna/workspace/AutoRestore/data/raw/foggy-048.jpg", "qalign"))
+    gnd_image = "/home/krishna/workspace/AutoRestore/demo/other/001.png"
+    chained_output = "/home/krishna/workspace/AutoRestore/demo/other/chained_output.png"
+    combined_output = "/home/krishna/workspace/AutoRestore/demo/other/combined.png"
+    # Resize images to match ground truth dimensions
+    from PIL import Image
+    import numpy as np
+    
+    # Load ground truth image to get target dimensions
+    gnd_img = Image.open(gnd_image)
+    target_size = gnd_img.size
+    
+    # Resize chained output
+    chained_img = Image.open(chained_output)
+    if chained_img.size != target_size:
+        chained_img_resized = chained_img.resize(target_size, Image.LANCZOS)
+        chained_img_resized.save(chained_output)
+    
+    # Resize combined output
+    combined_img = Image.open(combined_output)
+    if combined_img.size != target_size:
+        combined_img_resized = combined_img.resize(target_size, Image.LANCZOS)
+        combined_img_resized.save(combined_output)
+    print("SSIM:")
+    print("chained",ssim(Path(gnd_image), Path(chained_output)))
+    print("combined prompt",ssim(Path(gnd_image), Path(combined_output)))
+    print("PSNR:")
+    print("chained",psnr(Path(gnd_image), Path(chained_output)))
+    print("combined prompt",psnr(Path(gnd_image), Path(combined_output)))

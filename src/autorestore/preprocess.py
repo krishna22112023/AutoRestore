@@ -9,6 +9,7 @@ import requests
 import pyprojroot
 root = pyprojroot.find_root(pyprojroot.has_dir("src"))
 from dashscope import MultiModalConversation
+from pathlib import Path
 
 from src.utils.image_processing import resize_image, encode_file
 from config import logger
@@ -45,18 +46,33 @@ class QwenImageEdit:
             self.inference_steps = inference_steps
             self.true_cfg_scale = true_cfg_scale
     
-    def query_local(self, image_path: str, degradation_type: str, severity: str, output_path: str) -> float:
-        resp = requests.post(self.url, json={"image_path":image_path, "degradation_type":degradation_type, 
-        "severity":severity, "hf_name":self.hf_name, "default_size":self.default_size,"device_map":self.device_map,
-        "inference_steps":self.inference_steps, "true_cfg_scale":self.true_cfg_scale,  "output_path":output_path})
+    def query_local(self, image_path: str, pipeline: list[dict[str, str]], output_path: str) -> str:
+        """Send the full degradation pipeline to the local Qwen server.
+
+        Returns the filepath of the saved, processed image."""
+        resp = requests.post(
+            self.url,
+            json={
+                "image_path": image_path,
+                "pipeline": pipeline,
+                "hf_name": self.hf_name,
+                "default_size": self.default_size,
+                "device_map": self.device_map,
+                "inference_steps": self.inference_steps,
+                "true_cfg_scale": self.true_cfg_scale,
+                "output_path": output_path,
+            },
+        )
         resp.raise_for_status()
-        duration = resp.json()["duration"]
-        return duration
+        return resp.json().get("save_path", "")
 
-    def query_api(self, image_path: str, degradation_type: str, severity: str, output_path: str) -> str:
+    def query_api(self, image_path: str, pipeline: list[dict[str, str]], output_path: str) -> str:
+        """Call DashScope multimodal API with full degradation pipeline.
 
-        prompt = open(f"{root}/src/prompts/qwen_preprocessor.md").read()
-        formatted_prompt = prompt.format(degradation_type=degradation_type, severity=severity)
+        Returns the filepath of the saved, processed image."""
+
+        prompt_template = open(f"{root}/src/prompts/qwen_preprocessor.md").read()
+        formatted_prompt = prompt_template.replace("{degradation_type : severity}", str(pipeline))
 
         messages = [
             {
@@ -67,7 +83,7 @@ class QwenImageEdit:
                 ]
             }
         ]
-        logger.info("processing image using qwen-image-edit API")
+        logger.info("Processing image via Qwen API with full pipeline of %d steps", len(pipeline))
         start_time = time()
         response = MultiModalConversation.call(
             model=self.name,
@@ -82,23 +98,22 @@ class QwenImageEdit:
         if response.status_code == 200:
             content = response.output["choices"][0]["message"]["content"][0]["image"]
             img_response = requests.get(content)
+
             image = cv2.imread(image_path)
             if image is not None:
-                height, width, channels = image.shape
+                height, width = image.shape[:2]
             else:
                 with Image.open(image_path) as img:
                     width, height = img.size
-            
-            # Resize the processed image to match the original resolution using Torch with CUDA acceleration
+
             resized_pil = resize_image(img_response, height, width)
-            save_path = os.path.join(
-                output_path,
-                f"{os.path.basename(image_path)}-{degradation_type}-{severity}.jpg"
-            )
-            resized_pil.save(save_path, format="JPEG")
-            logger.info(f"Image resized and saved to {output_path}")
-            return response
+            ext = Path(image_path).suffix or ".jpg"
+            save_path = os.path.join(output_path, f"{Path(image_path).stem}-restored{ext}")
+            resized_pil.save(save_path)
+            logger.info("Image saved to %s", save_path)
+            return save_path
         else:
             logger.error(f"HTTP status code: {response.status_code}")
             logger.error(f"Error code: {response.code}")
             logger.error(f"Error message: {response.message}")
+            return ""

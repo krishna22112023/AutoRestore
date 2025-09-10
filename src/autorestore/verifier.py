@@ -22,6 +22,7 @@ class Verifier:
             logger.info("Verification stage disabled. verification skipped.")
             return
         general_config = config.get("general", {})
+        self.supported_exts = general_config.get("supported_extensions", ["jpg", "jpeg", "png"]) 
         self.data_path = Path(settings.BASE / general_config.get("data_path", "data/raw"))
         self.processed_path = Path(settings.BASE / general_config.get("processed_path", "data/processed"))
         self.artefacts_path = Path(settings.BASE / general_config.get("artefacts_path", "data/artefacts"))
@@ -31,8 +32,9 @@ class Verifier:
     def run(self) -> None:
         failed: List[str] = []
         verify_scores: Dict[str, Dict[str, float]] = {}
-
-        for proc_img in self.processed_path.glob("*.jpg"):
+        patterns = [f"*.{e}" for e in self.supported_exts]
+        imgs = [p for pat in patterns for p in self.processed_path.glob(pat)]
+        for proc_img in imgs:
             logger.info(f"Verifying quality of {proc_img.name}")
             raw_img = self.data_path / proc_img.name
             if not raw_img.exists():

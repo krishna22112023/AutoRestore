@@ -96,30 +96,30 @@ class Executor:
             deg_list = self.iqa_data.get(img_name, [])
             severity_map = {d: s for d, s in deg_list}
 
-            current_img_path = raw_path
             tmp_dir = tmp_root / img_name
             ensure_dir(tmp_dir)
-            for step_idx, degradation in enumerate(seq):
-                # seq items are space-separated original names
-                sev = severity_map.get(degradation, "medium")
-                logger.info(f"Step {step_idx+1} of {len(seq)}: Processing {img_name} with degradation {degradation} and severity {sev}")
-                out_dir = tmp_dir
-                if self.use_api:
-                    self.qwen.query_api(str(current_img_path), degradation, sev, str(out_dir))
-                else:
-                    self.qwen.query_local(str(current_img_path),degradation,sev,str(out_dir))
-                current_img_path = out_dir / f"{current_img_path.name}-{degradation}-{sev}.jpg"
 
-            # Copy / move final image to processed_path with original filename
+            # Build full degradation pipeline list
+            pipeline = [{deg: severity_map.get(deg, "medium")} for deg in seq]
+
+            if self.use_api:
+                saved_path = self.qwen.query_api(str(raw_path), pipeline, str(tmp_dir))
+            else:
+                saved_path = self.qwen.query_local(str(raw_path), pipeline, str(tmp_dir))
+
+            if not saved_path:
+                logger.error("Processing failed (no output) for %s", img_name)
+                return
+
+            final_path_src = Path(saved_path)
             final_path = self.processed_path / img_name
             try:
-                shutil.move(str(current_img_path), final_path)
+                shutil.move(str(final_path_src), final_path)
                 logger.info(f"Preprocessed image saved to {final_path}")
             except shutil.Error:
                 # Different filesystem – fallback to copy
-                shutil.copy(str(current_img_path), final_path)
+                shutil.copy(str(final_path_src), final_path)
 
-            # Cleanup tmp
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
         if self.batch:

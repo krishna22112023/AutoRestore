@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import List, Dict
 import pyprojroot
+import time
 import sys
 import os
 import argparse
@@ -20,7 +21,6 @@ from src.autorestore.verifier import Verifier
 
 load_dotenv(Path(root, ".env"))
 dashscope.api_key = settings.DASHSCOPE_API_KEY
-print(dashscope.api_key)
 
 def main(args):
     cfg = load_config(args.config_path, args.experiment)
@@ -30,6 +30,7 @@ def main(args):
     max_retries = int(general_config.get("max_retries", 3))
     artefacts_path = Path(root / general_config.get("artefacts_path", "data/artefacts"))
     data_path = Path(root / general_config.get("data_path", "data/raw"))
+    supported_exts = general_config.get("supported_extensions", ["jpg", "jpeg", "png"])
 
     #check if api is loaded
     if cfg.get("executor", {}).get("preprocess", {}).get("use_api"):
@@ -42,7 +43,7 @@ def main(args):
     # Initialise raw.json if not present
     raw_list_path = artefacts_path / "state.json"
     if not raw_list_path.exists():
-        all_raw = [p.name for p in data_path.glob("*.jpg")]
+        all_raw = [p.name for ext in supported_exts for p in data_path.glob(f"*.{ext}")]
         write_json(all_raw, raw_list_path)
 
     for attempt in range(1, max_retries + 1):
@@ -71,16 +72,46 @@ def main(args):
 
         # Planning restricted to failed/raw list of images
         planning = Planning(cfg)
+        t0 = time.perf_counter()
         planning.image_quality_analysis(images_subset=to_process, replan=(attempt > 1), previous_plans=prev_plans_map)
+        iq_time = time.perf_counter() - t0
+
+        t1 = time.perf_counter()
         planning.batch_process(replan=(attempt > 1))
+        bp_time = time.perf_counter() - t1
 
         # Execute
         executor = Executor(cfg)
+        t2 = time.perf_counter()
         executor.run()
+        exec_time = time.perf_counter() - t2
 
         # Verify
         verifier = Verifier(cfg)
+        t3 = time.perf_counter()
         verifier.run()
+        ver_time = time.perf_counter() - t3
+
+        # Assemble inference speed breakdown for this attempt
+        speed_entry = {
+            "planner": {
+                "image_quality_analysis": round(iq_time, 2),
+                "batch_process": round(bp_time, 2),
+            },
+            "executor": round(exec_time, 2),
+            "verifier": round(ver_time, 2),
+        }
+
+        # Inject speed entry into verify_IQA.json
+        verify_path = artefacts_path / "verify_IQA.json"
+        if verify_path.exists():
+            try:
+                verify_data = read_json(verify_path)
+                for img_meta in verify_data.values():
+                    img_meta.setdefault("inference_speed", {})[f"attempt{attempt}"] = speed_entry
+                write_json(verify_data, verify_path)
+            except Exception as e:
+                logger.error("Failed to write inference speed to %s: %s", verify_path, e)
 
         failed_path = artefacts_path / "failed_IQA.json"
         failed_imgs: List[str] = read_json(failed_path) if failed_path.exists() else []
