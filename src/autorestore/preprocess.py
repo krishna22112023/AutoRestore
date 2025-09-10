@@ -11,7 +11,7 @@ root = pyprojroot.find_root(pyprojroot.has_dir("src"))
 from dashscope import MultiModalConversation
 
 from src.utils.image_processing import resize_image, encode_file
-from config import logger, settings
+from config import logger
 
 class QwenImageEdit:
     """Wrapper around Qwen Image Edit API or local HF model.
@@ -47,7 +47,7 @@ class QwenImageEdit:
     
     def query_local(self, image_path: str, degradation_type: str, severity: str, output_path: str) -> float:
         resp = requests.post(self.url, json={"image_path":image_path, "degradation_type":degradation_type, 
-        "severity":severity, hf_name = self.hf_name, "default_size":self.default_size,"device_map":self.device_map,
+        "severity":severity, "hf_name":self.hf_name, "default_size":self.default_size,"device_map":self.device_map,
         "inference_steps":self.inference_steps, "true_cfg_scale":self.true_cfg_scale,  "output_path":output_path})
         resp.raise_for_status()
         duration = resp.json()["duration"]
@@ -67,11 +67,9 @@ class QwenImageEdit:
                 ]
             }
         ]
-        api_key = settings.DASHSCOPE_API_KEY
         logger.info("processing image using qwen-image-edit API")
         start_time = time()
         response = MultiModalConversation.call(
-            api_key=api_key,
             model=self.name,
             messages=messages,
             result_format='message',

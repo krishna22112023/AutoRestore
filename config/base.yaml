@@ -13,8 +13,8 @@ experiments:
       optimize_pipeline: true #enable exhaustive pipeline order search
       IQA: 
         model: depictqa #model for degradation and severity detection
-        severity: {"very low", "low", "medium", "high", "very high"}
-        severity_threshold: {"medium", "high", "very high"} #only select degradation of severity greater than or equal to medium
+        severity: ["very low", "low", "medium", "high", "very high"]
+        severity_threshold: ["medium", "high", "very high"] #only select degradation of severity greater than or equal to medium
         degradations: [
           "motion blur", "defocus blur", "rain",
           "haze", "dark", "noise", "jpeg compression artifact"

@@ -1,0 +1,32 @@
+{
+  "foggy-048.jpg": [
+    [
+      "motion blur",
+      "very low"
+    ],
+    [
+      "defocus blur",
+      "medium"
+    ],
+    [
+      "rain",
+      "very low"
+    ],
+    [
+      "haze",
+      "very high"
+    ],
+    [
+      "dark",
+      "very low"
+    ],
+    [
+      "noise",
+      "very low"
+    ],
+    [
+      "jpeg compression artifact",
+      "very low"
+    ]
+  ]
+}

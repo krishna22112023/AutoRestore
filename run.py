@@ -5,25 +5,25 @@ import sys
 import os
 import argparse
 from dotenv import load_dotenv
+import dashscope
 
 root = pyprojroot.find_root(pyprojroot.has_dir("src"))
+
 sys.path.append(str(root))
-load_dotenv(os.path.join(root,".env"))
 
 from config.run_config import load_config
-from config import logger
+from config import logger, settings
 from src.utils.file import write_json, read_json
 from src.autorestore.planner import Planning
 from src.autorestore.executor import Executor
 from src.autorestore.verifier import Verifier
 
-def main():
-    # Load experiment configuration – default to 'base' or set via ENV EXPERIMENT
-    parser = argparse.ArgumentParser(description="AutoRestore image restoration pipeline")
-    parser.add_argument("--experiment", default="base", help="Experiment configuration to use (default: base)")
-    parser.add_argument("--config_path", default="config/base.yaml", help="Path to yaml configuration file")
-    args = parser.parse_args()
-    cfg = load_config(args.experiment)
+load_dotenv(Path(root, ".env"))
+dashscope.api_key = settings.DASHSCOPE_API_KEY
+print(dashscope.api_key)
+
+def main(args):
+    cfg = load_config(args.config_path, args.experiment)
 
     # General settings
     general_config = cfg.get("general", {})
@@ -31,8 +31,16 @@ def main():
     artefacts_path = Path(root / general_config.get("artefacts_path", "data/artefacts"))
     data_path = Path(root / general_config.get("data_path", "data/raw"))
 
+    #check if api is loaded
+    if cfg.get("executor", {}).get("preprocess", {}).get("use_api"):
+        if os.environ.get("DASHSCOPE_API_KEY") is None:
+            logger.error("DASHSCOPE_API_KEY is not set. Please create a .env file in the root directory and set the DASHSCOPE_API_KEY")
+            raise ValueError("DASHSCOPE_API_KEY is not set")
+        else:
+            logger.info("DASHSCOPE_API_KEY is set")
+
     # Initialise raw.json if not present
-    raw_list_path = artefacts_path / "raw.json"
+    raw_list_path = artefacts_path / "state.json"
     if not raw_list_path.exists():
         all_raw = [p.name for p in data_path.glob("*.jpg")]
         write_json(all_raw, raw_list_path)
@@ -82,3 +90,10 @@ def main():
     else:
         logger.info("Maximum retries (%d) reached. Some images still failed.", max_retries)
 
+if __name__ == "__main__":
+    # Load experiment configuration – default to 'base' or set via ENV EXPERIMENT
+    parser = argparse.ArgumentParser(description="AutoRestore image restoration pipeline")
+    parser.add_argument("--experiment", default="base", help="Experiment configuration to use (default: base)")
+    parser.add_argument("--config_path", default="config/base.yaml", help="Path to yaml configuration file")
+    args = parser.parse_args()
+    main(args)

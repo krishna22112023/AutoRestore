@@ -2,6 +2,10 @@ import logging
 import base64
 import mimetypes
 from PIL import Image
+from typing import Union
+from pathlib import Path
+import cv2
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -36,3 +40,10 @@ def encode_file(file_path):
     with open(file_path, "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
     return f"data:{mime_type};base64,{encoded_string}"
+
+def read_image(path: Union[str, Path]) -> np.ndarray:
+    """Read an image from *path* as float32 BGR in [0, 1]."""
+    img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if img is None:
+        raise FileNotFoundError(f"Could not read image: {path}")
+    return img.astype(np.float32) / 255.0

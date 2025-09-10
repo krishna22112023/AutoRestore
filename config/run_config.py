@@ -6,7 +6,7 @@ from typing import Any, Dict
 
 
 @lru_cache(maxsize=None)
-def load_config(experiment: str = "base") -> Dict[str, Any]:
+def load_config(path : str, experiment: str = "base") -> Dict[str, Any]:
     """Load *config/base.yaml* and return the configuration for a given experiment.
 
     The YAML file is structured as:
@@ -22,9 +22,15 @@ def load_config(experiment: str = "base") -> Dict[str, Any]:
     merge of the chosen experiment onto the *base* template. Returned value is
     a plain dict that callers may freely mutate.
     """
-    cfg_path = Path(__file__).resolve().parent / "base.yaml"
-    if not cfg_path.exists():
-        raise FileNotFoundError(f"Configuration file not found: {cfg_path}")
+    if path is None:
+        cfg_path = Path(f"config/{experiment}.yaml")
+        #check if file exists
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"Configuration file not found: {path}. Pls specify path")
+    else:
+        cfg_path = Path(path)
+        if not cfg_path.exists():
+            raise FileNotFoundError(f"Configuration file not found: {cfg_path}")
 
     with cfg_path.open("r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh)

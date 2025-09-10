@@ -15,9 +15,8 @@ import sys
 root = pyprojroot.find_root(pyprojroot.has_dir("src"))
 sys.path.append(str(root))
 
-from src.autorestore.IQA import DepictQA, QAlign, ViT 
+from src.autorestore.IQA import DepictQA, NR_IQA, ViT, restoration_score
 from src.autorestore.preprocess import QwenImageEdit
-from src.autorestore.metrics import restoration_score
 from src.utils.file import ensure_dir, write_json, read_json
 from config.run_config import load_config
 from config import logger
@@ -41,8 +40,8 @@ class Planning:
         # Load global configuration once
         planner_config = config.get("planner", {})
         iqa_config = planner_config.get("IQA", {})
-        self.severity = iqa_config.get("severity", {"very low", "low", "medium", "high", "very high"})
-        self.severity_threshold = set(map(str.lower, iqa_config.get("severity_threshold", ["medium", "high", "very high"])))
+        self.severity = iqa_config.get("severity", ["very low","low","medium", "high", "very high"])
+        self.severity_threshold = iqa_config.get("severity_threshold", ["medium", "high", "very high"])
         self.degradations = iqa_config.get(
             "degradations",
             [
@@ -69,8 +68,8 @@ class Planning:
         self.artefacts_path = Path(root / general_config.get("artefacts_path", "data/artefacts"))
         self.num_workers = general_config.get("num_workers", 4)
         ensure_dir(self.artefacts_path)
-        self.depictqa = DepictQA()
-        self.qalign = QAlign()
+        self.depictqa = DepictQA(self.degradations, self.severity)
+        self.qalign = NR_IQA()
         self.vit = ViT()    
         preprocess_config = config.get("executor", {}).get("preprocess", {})
         self.qwen = QwenImageEdit(use_api=preprocess_config.get("use_api", True),name=preprocess_config.get("name", "qwen-edit"))
@@ -160,16 +159,18 @@ class Planning:
             for c in combinations(self.degradations, r)
         }
 
+        severity_rank = {sev: i for i, sev in enumerate(reversed(self.severity_threshold))}
+
         for img_name, deg_list in per_image.items():
             # Filter degradations by severity ≥ medium
             valid: List[Tuple[str, str]] = [
-                (d, s.lower()) for d, s in deg_list if s.lower() in self.severity_threshold
+                (d, s.lower()) for d, s in deg_list if s.lower() in severity_rank
             ]
             if not valid:
-                continue  # skip images without significant degradation
+                continue  # skip images without significant degradation+++
 
             # Sort by severity rank desc, keep unique degradation names
-            valid_sorted = sorted(valid, key=lambda x: -self.severity_threshold[x[1]])
+            valid_sorted = sorted(valid, key=lambda x: -severity_rank[x[1]])
             unique_deg = []
             for d, _ in valid_sorted:
                 if d not in unique_deg:
@@ -324,8 +325,10 @@ class Planning:
 
             # Finished the pipeline – compute quality score
             try:
-                score = restoration_score(img_path, current_img_path, self.vit, self.qalign, self._lambda)
-            except Exception:
+                score = restoration_score(img_path, current_img_path, self._lambda, self.vit, self.qalign)
+                logger.info("Permutation %s → score %.4f", "->".join(perm), score)
+            except Exception as e:
+                logger.exception("Restoration score calculation failed for %s: %s", img_path, e)
                 score = -float("inf")
             if score > best_score:
                 best_score = score

@@ -8,11 +8,11 @@ root = pyprojroot.find_root(pyprojroot.has_dir("src"))
 sys.path.append(str(root))
 
 from src.utils.file import ensure_dir, write_json
-from src.autorestore.IQA import QAlign
+from src.autorestore.IQA import NR_IQA,psnr,ssim
 from config import logger, settings
 
 class Verifier:
-    """Compare raw vs processed images using QAlign."""
+    """Compare raw vs processed images using NR_IQA."""
 
     def __init__(self,config: dict,) -> None:
         logger.info("Starting verification stage")
@@ -26,11 +26,11 @@ class Verifier:
         self.processed_path = Path(settings.BASE / general_config.get("processed_path", "data/processed"))
         self.artefacts_path = Path(settings.BASE / general_config.get("artefacts_path", "data/artefacts"))
         ensure_dir(self.artefacts_path)
-        self.qalign = QAlign()
+        self.nr_iqa = NR_IQA()
 
     def run(self) -> None:
         failed: List[str] = []
-        verify_scores: Dict[str, Tuple[List, List]] = {}
+        verify_scores: Dict[str, Dict[str, float]] = {}
 
         for proc_img in self.processed_path.glob("*.jpg"):
             logger.info(f"Verifying quality of {proc_img.name}")
@@ -40,14 +40,32 @@ class Verifier:
                 continue
 
             try:
-                # Individual degradation evaluation for record
-                raw_score = self.qalign.query(str(raw_img))
-                proc_score = self.qalign.query(str(proc_img))
-                verify_scores[proc_img.name] = [raw_score, proc_score]
-                logger.info(f"verified {proc_img.name} = raw image score: {raw_score}, processed image score: {proc_score}")
-                if proc_score <= raw_score:
+                # no reference iqa metrics
+                qalign_raw_score = self.nr_iqa.query(str(raw_img), "qalign")
+                qalign_proc_score = self.nr_iqa.query(str(proc_img), "qalign")
+                maniqa_raw_score = self.nr_iqa.query(str(raw_img), "maniqa")
+                maniqa_proc_score = self.nr_iqa.query(str(proc_img), "maniqa")
+                clipqa_raw_score = self.nr_iqa.query(str(raw_img), "clipiqa")
+                clipqa_proc_score = self.nr_iqa.query(str(proc_img), "clipiqa")
+                musiq_raw_score = self.nr_iqa.query(str(raw_img), "musiq")
+                musiq_proc_score = self.nr_iqa.query(str(proc_img), "musiq")
+
+                #full reference iqa metrics
+                psnr_score = psnr(str(raw_img), str(proc_img))
+                ssim_score = ssim(str(raw_img), str(proc_img))
+                lpips_score = self.nr_iqa.query(str(raw_img), "lpips",str(proc_img))
+
+                verify_scores[proc_img.name] = {"NR_IQA":{"qalign": {"raw": qalign_raw_score, "proc": qalign_proc_score},
+                "maniqa": {"raw": maniqa_raw_score, "proc": maniqa_proc_score},
+                "clipiqa": {"raw": clipqa_raw_score, "proc": clipqa_proc_score},
+                "musiq": {"raw": musiq_raw_score, "proc": musiq_proc_score}}, 
+                "FR_IQA":{"lpips": lpips_score, "psnr": psnr_score, "ssim": ssim_score}}
+
+                logger.info(f"verified {proc_img.name} = raw image score: {qalign_raw_score}, processed image score: {qalign_proc_score}")
+                if qalign_proc_score <= qalign_raw_score:
                     logger.info(f"verification failed for {proc_img.name}. appended to failed list to replan.")
                     failed.append(proc_img.name)
+                
             except Exception as e:
                 logger.error("Internal failure during verification %s: %s", proc_img.name, e)
             logger.info(f"verification passed for {proc_img.name}")
