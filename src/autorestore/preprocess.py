@@ -66,12 +66,12 @@ class QwenImageEdit:
         resp.raise_for_status()
         return resp.json().get("save_path", "")
 
-    def query_api(self, image_path: str, pipeline: list[dict[str, str]], output_path: str) -> str:
+    def query_api_executor(self, image_path: str, pipeline: list[dict[str, str]], output_path: str) -> str:
         """Call DashScope multimodal API with full degradation pipeline.
 
         Returns the filepath of the saved, processed image."""
 
-        prompt_template = open(f"{root}/src/prompts/qwen_preprocessor.md").read()
+        prompt_template = open(f"{root}/src/prompts/qwen_preprocessor_executor.md").read()
         formatted_prompt = prompt_template.replace("{degradation_type : severity}", str(pipeline))
 
         messages = [
@@ -84,6 +84,57 @@ class QwenImageEdit:
             }
         ]
         logger.info("Processing image via Qwen API with full pipeline of %d steps", len(pipeline))
+        start_time = time()
+        response = MultiModalConversation.call(
+            model=self.name,
+            messages=messages,
+            result_format='message',
+            stream=False,
+            negative_prompt=""
+        )
+        end_time = time()
+        logger.info("processing done response: ", response)
+        logger.info(f"inference time : {end_time - start_time} seconds")
+        if response.status_code == 200:
+            content = response.output["choices"][0]["message"]["content"][0]["image"]
+            img_response = requests.get(content)
+
+            image = cv2.imread(image_path)
+            if image is not None:
+                height, width = image.shape[:2]
+            else:
+                with Image.open(image_path) as img:
+                    width, height = img.size
+
+            resized_pil = resize_image(img_response, height, width)
+            ext = Path(image_path).suffix or ".jpg"
+            save_path = os.path.join(output_path, f"{Path(image_path).stem}-restored{ext}")
+            resized_pil.save(save_path)
+            logger.info("Image saved to %s", save_path)
+            return save_path
+        else:
+            logger.error(f"HTTP status code: {response.status_code}")
+            logger.error(f"Error code: {response.code}")
+            logger.error(f"Error message: {response.message}")
+            return ""
+    
+    def query_api_planner(self, image_path: str, degradation: str, severity: str, output_path: str) -> str:
+        """Call DashScope multimodal API with degradation and severity.
+
+        Returns the filepath of the saved, processed image."""
+
+        prompt_template = open(f"{root}/src/prompts/qwen_preprocessor_planner.md").read()
+        formatted_prompt = prompt_template.replace("{degradation_type}", degradation).replace("{severity}", severity)
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"image": encode_file(image_path)},
+                    {"text": formatted_prompt}
+                ]
+            }
+        ]
         start_time = time()
         response = MultiModalConversation.call(
             model=self.name,

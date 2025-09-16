@@ -1,0 +1,8 @@
+{
+  "attempt1": {
+    "planner.batching": 55.25,
+    "planner.optimization": 154.54,
+    "executor": 51.32,
+    "verifier": 27.81
+  }
+}

@@ -3,6 +3,7 @@ warnings.filterwarnings("ignore")
 from typing import Optional
 from pathlib import Path
 from typing import Union
+import os
 import numpy as np
 import requests
 import pyprojroot
@@ -93,13 +94,20 @@ class ViT:
 
 def restoration_score(raw_image: Path, proc_image: Path, _lambda: float, vit, qalign) -> float:
     #calculate scores
-    cos_sim = vit.query(str(raw_image), str(proc_image))
-    qalign_score = qalign.query(str(proc_image), "qalign")
-    #min max normalize score
-    cos_sim_normalized = (cos_sim + 1) / 2
-    qalign_score_normalized = (qalign_score - 1) / 4
-    score = _lambda * cos_sim_normalized + (1-_lambda) * qalign_score_normalized
-    return score
+    if _lambda == 0.0:
+        qalign_score = qalign.query(str(proc_image), "qalign")
+        qalign_score_normalized = (qalign_score - 1) / 4
+        return qalign_score_normalized
+    else:
+        if not os.path.exists(proc_image):
+            logger.warning("Processed image not found for ViT query: %s", proc_image)
+            return float("nan")
+        cos_sim = vit.query(str(raw_image), str(proc_image))
+        qalign_score = qalign.query(str(proc_image), "qalign")
+        cos_sim_normalized = (cos_sim + 1) / 2
+        qalign_score_normalized = (qalign_score - 1) / 4
+        score = _lambda * cos_sim_normalized + (1-_lambda) * qalign_score_normalized
+        return score
 
 class DepictQA:
     """Parameters when called: img_path_lst, task (eval_degradation or comp_quality), degradations (if task is eval_degradation)."""
@@ -135,7 +143,7 @@ class DepictQA:
             degradations_lst = all_degradations
         else:
             if degradation == "low resolution":
-                degradation = "blur"
+                degradation = "low resolution"
             else:
                 assert isinstance(
                     degradation, str
@@ -193,7 +201,7 @@ class DepictQA:
         return prompt, choice
 
 if __name__ == "__main__":
-    gnd_image = "/home/krishna/workspace/AutoRestore/demo/other/001.png"
+    '''gnd_image = "/home/krishna/workspace/AutoRestore/demo/other/001.png"
     chained_output = "/home/krishna/workspace/AutoRestore/demo/other/chained_output.png"
     combined_output = "/home/krishna/workspace/AutoRestore/demo/other/combined.png"
     # Resize images to match ground truth dimensions
@@ -220,4 +228,11 @@ if __name__ == "__main__":
     print("combined prompt",ssim(Path(gnd_image), Path(combined_output)))
     print("PSNR:")
     print("chained",psnr(Path(gnd_image), Path(chained_output)))
-    print("combined prompt",psnr(Path(gnd_image), Path(combined_output)))
+    print("combined prompt",psnr(Path(gnd_image), Path(combined_output)))'''
+
+    raw_image = "/home/krishna/workspace/AutoRestore/eval/data/d3/dark_defocus_blur_jpeg compression_artifact/lambda_0/raw/004.png"
+    proc_image = "/home/krishna/workspace/AutoRestore/eval/data/d3/dark_defocus_blur_jpeg compression_artifact/lambda_0/artefacts/tmp_planning/jpeg_compression_artifact/jpeg compression artifact/004-restored.png"
+    vit = ViT()
+    score = vit.query(str(raw_image), str(proc_image))
+    print("score",score)
+    

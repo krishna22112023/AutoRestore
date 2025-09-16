@@ -1,6 +1,6 @@
 .env
 .venv
 
-eval/data/** 
+eval/data/**
 data/** 
 logs/**

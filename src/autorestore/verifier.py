@@ -29,7 +29,7 @@ class Verifier:
         ensure_dir(self.artefacts_path)
         self.nr_iqa = NR_IQA()
 
-    def run(self) -> None:
+    def run(self) -> List[str]:
         failed: List[str] = []
         verify_scores: Dict[str, Dict[str, float]] = {}
         patterns = [f"*.{e}" for e in self.supported_exts]
@@ -72,12 +72,9 @@ class Verifier:
                 logger.error("Internal failure during verification %s: %s", proc_img.name, e)
             logger.info(f"verification passed for {proc_img.name}")
 
-        # Save failed list
-        failed_path = self.artefacts_path / "failed_IQA.json"
-        write_json(failed, failed_path)
-        logger.info("Verification complete. %d failures saved to %s", len(failed), failed_path)
-
         # Save evaluation details
         eval_path = self.artefacts_path / "verify_IQA.json"
         write_json(verify_scores, eval_path)
         logger.info("Per-image evaluation saved to %s", eval_path)
+
+        return failed

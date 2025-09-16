@@ -122,10 +122,10 @@ class Planning:
                     deg_choices = random.sample(self.degradations, k=min(self.max_degradations, len(self.degradations)))
                     sev_list = list(self.severity)
                     res = [(d, random.choice(sev_list)) for d in deg_choices]
+                logger.info(f"DepictQA result for {img_path.name}: {res}")
 
             except Exception as e:  
                 logger.error("DepictQA failed for %s: %s", img_path.name, e)
-                sys.exit(1)
                 res = []
                 
 
@@ -207,6 +207,15 @@ class Planning:
         # Load the mapping of degradation-combo → image list
         batches: Dict[str, List[str]] = read_json(batch_file)
 
+        # Load any existing pipelines once, so it's available to both branches
+        existing_pipelines: Dict[str, List[str]] = {}
+        pipeline_file = self.artefacts_path / "batch_pipeline.json"
+        if pipeline_file.exists():
+            try:
+                existing_pipelines = read_json(pipeline_file)
+            except Exception:
+                existing_pipelines = {}
+
         # If pipeline optimization is disabled, randomly assign an order for each degradation combo
         if not self.optimize_pipeline:
             logger.info("optimize_pipeline flag is False – generating random pipelines instead of exhaustive search.")
@@ -232,14 +241,6 @@ class Planning:
 
         # If pipeline optimization is enabled, perform exhaustive search
         logger.info("optimize_pipeline flag is True – performing exhaustive search.")
-        existing_pipelines: Dict[str, List[str]] = {}
-        pipeline_file = self.artefacts_path / "batch_pipeline.json"
-        if pipeline_file.exists():
-            try:
-                existing_pipelines = read_json(pipeline_file)
-            except Exception as e:
-                logger.warning("No existing pipeline file – proceeding with empty set: %s", e)
-                existing_pipelines = {}
 
         # Load IQA for severity lookup
         iqa_data: Dict[str, List[Tuple[str, str]]] = read_json(self.artefacts_path / "IQA.json")
@@ -317,18 +318,28 @@ class Planning:
                 tmp_out_dir = self.artefacts_path / "tmp_planning" / degradation_id / "_".join(perm)
                 ensure_dir(tmp_out_dir)
                 if self.use_api:
-                    self.qwen.query_api(str(current_img_path), degradation, severity, str(tmp_out_dir))
+                    save_path = self.qwen.query_api_planner(
+                        str(current_img_path), degradation, severity, str(tmp_out_dir)
+                    )
                 else:
-                    self.qwen.query_local(str(current_img_path), degradation, severity, str(tmp_out_dir))
-                next_img = tmp_out_dir / f"{current_img_path.name}-{degradation}-{severity}.jpg"
-                current_img_path = next_img
+                    # For local execution we fake a single-step pipeline containing the degradation
+                    save_path = self.qwen.query_local(
+                        str(current_img_path),
+                        [{"degradation": degradation, "severity": severity}],
+                        str(tmp_out_dir),
+                    )
 
-            # Finished the pipeline – compute quality score
+                # Fall back to deterministic name if backend didn't return a path
+                if not save_path:
+                    save_path = tmp_out_dir / f"{current_img_path.stem}-{degradation}-{severity}.jpg"
+                current_img_path = Path(save_path)
+
             try:
                 score = restoration_score(img_path, current_img_path, self._lambda, self.vit, self.qalign)
                 logger.info("Permutation %s → score %.4f", "->".join(perm), score)
             except Exception as e:
-                logger.exception("Restoration score calculation failed for %s: %s", img_path, e)
+                logger.error("Restoration score calculation failed. raw: %s, current: %s, lambda: %s", img_path, current_img_path, self._lambda)
+                logger.exception("Error details: %s", e)
                 score = -float("inf")
             if score > best_score:
                 best_score = score

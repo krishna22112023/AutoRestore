@@ -2,9 +2,9 @@ experiments:
   # Base configuration – used as template for all experiments
   base: &base_template
     general: &general_base
-      data_path: "demo/raw"
-      artefacts_path: "demo/artefacts"
-      processed_path: "demo/processed"
+      data_path: "demo/test1/raw"
+      artefacts_path: "demo/test1/artefacts"
+      processed_path: "demo/test1/processed"
       max_retries: 3
       num_workers: 4
       supported_extensions: ["jpg", "jpeg", "png"]
@@ -18,7 +18,7 @@ experiments:
         severity_threshold: ["medium", "high", "very high"] #only select degradation of severity greater than or equal to medium
         degradations: [
           "motion blur", "defocus blur", "rain",
-          "haze", "dark", "noise", "jpeg compression artifact"
+          "haze", "dark", "noise", "jpeg compression artifact", "low resolution"
         ]
         max_degradations: 3
       batch_by_degradation: true #batch by degradation type
@@ -43,15 +43,6 @@ experiments:
 
     verifier: &verifier_base
       enable: true
-# Exp 1 – Varying λ during pipeline optimisation
-  lambda_0:
-    general: *general_base
-    planner:
-      <<: *planner_base
-      lambda: 0
-    executor: *executor_base
-    verifier: *verifier_base
-
   lambda_0_3:
     general: *general_base
     planner:
@@ -59,10 +50,8 @@ experiments:
       lambda: 0.3
     executor: *executor_base
     verifier: *verifier_base
-
   lambda_0_5:
     <<: *base_template           
-
   lambda_0_7:
     general: *general_base
     planner:
@@ -70,34 +59,3 @@ experiments:
       lambda: 0.7
     executor: *executor_base
     verifier: *verifier_base
-
-# Exp 2 – Pipeline variants
-  random_planning:
-    general: *general_base
-    planner:
-      <<: *planner_base
-      enable: false
-      optimize_pipeline: false   # Disable planning
-    executor: *executor_base
-    verifier: *verifier_base
-
-  planned_no_optimisation:
-    general: *general_base
-    planner:
-      <<: *planner_base
-      enable: true
-      optimize_pipeline: false   # Use detected order, no search
-    executor: *executor_base
-    verifier: *verifier_base
-
-  planned_opt_no_verify:
-    general:
-      <<: *general_base
-      max_retries: 1             # Single pass
-    planner: *planner_base
-    executor: *executor_base
-    verifier:
-      enable: false              # Skip verification
-
-  planned_opt_with_verify:
-    <<: *base_template

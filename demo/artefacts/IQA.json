@@ -27,6 +27,10 @@
     [
       "jpeg compression artifact",
       "very low"
+    ],
+    [
+      "low resolution",
+      "very low"
     ]
   ]
 }

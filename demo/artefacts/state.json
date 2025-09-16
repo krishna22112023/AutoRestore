@@ -1,1 +1,11 @@
-["foggy-048.jpg"]
+{
+  "attempt1": {
+    "foggy-048.jpg": {
+      "planner.batching": true,
+      "planner.optimization": true,
+      "executor": true,
+      "verifier": true,
+      "replan": false
+    }
+  }
+}

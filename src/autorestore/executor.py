@@ -103,7 +103,7 @@ class Executor:
             pipeline = [{deg: severity_map.get(deg, "medium")} for deg in seq]
 
             if self.use_api:
-                saved_path = self.qwen.query_api(str(raw_path), pipeline, str(tmp_dir))
+                saved_path = self.qwen.query_api_executor(str(raw_path), pipeline, str(tmp_dir))
             else:
                 saved_path = self.qwen.query_local(str(raw_path), pipeline, str(tmp_dir))
 

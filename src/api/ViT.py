@@ -1,18 +1,23 @@
 import argparse
-import logging
+import sys
+import pyprojroot
 from functools import lru_cache
 from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from PIL import Image
 from pydantic import BaseModel, Field
 from transformers import AutoImageProcessor, AutoModel
 import uvicorn
 
-logger = logging.getLogger(__name__)
+root = pyprojroot.find_root(pyprojroot.has_dir("src"))
+sys.path.append(str(root))
 
+from config import logger
 
 def _device() -> torch.device:
     """Return CUDA device if available else CPU."""
@@ -66,13 +71,38 @@ def create_app() -> FastAPI:
         description="Compute cosine similarity between embeddings of two images using a pre-trained Vision Transformer (ViT).",
     )
 
+    # Log every incoming request and response
+    @app.middleware("http")
+    async def log_requests(request: Request, call_next):
+        logger.info("Incoming %s %s", request.method, request.url.path)
+        try:
+            response = await call_next(request)
+            logger.info("Completed %s %s -> %s", request.method, request.url.path, response.status_code)
+            return response
+        except Exception as exc:
+            logger.exception("Unhandled error processing request: %s", exc)
+            raise
+
+    # Custom exception handlers for better logging & JSON responses
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        logger.warning("HTTPException: %s - detail: %s", exc.status_code, exc.detail)
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        logger.warning("Validation error: %s", exc)
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
     @app.post("/vit_similarity")
     async def vit_similarity_endpoint(payload: _ImagePair):
         raw_path = Path(payload.raw_image)
         proc_path = Path(payload.processed_image)
         if not raw_path.exists():
+            logger.warning("Raw image not found: %s", raw_path)
             raise HTTPException(status_code=400, detail=f"Raw image not found: {raw_path}")
         if not proc_path.exists():
+            logger.warning("Processed image not found: %s", proc_path)
             raise HTTPException(status_code=400, detail=f"Processed image not found: {proc_path}")
         try:
             score = _cosine_similarity(raw_path, proc_path, payload.model)
