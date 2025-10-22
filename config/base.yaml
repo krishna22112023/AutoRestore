@@ -2,9 +2,9 @@ experiments:
   # Base configuration – used as template for all experiments
   base: &base_template
     general: &general_base
-      data_path: "demo/test1/raw"
-      artefacts_path: "demo/test1/artefacts"
-      processed_path: "demo/test1/processed"
+      data_path: "demo/raw"
+      artefacts_path: "demo/artefacts"
+      processed_path: "demo/processed"
       max_retries: 3
       num_workers: 4
       supported_extensions: ["jpg", "jpeg", "png"]
@@ -50,8 +50,6 @@ experiments:
       lambda: 0.3
     executor: *executor_base
     verifier: *verifier_base
-  lambda_0_5:
-    <<: *base_template           
   lambda_0_7:
     general: *general_base
     planner:

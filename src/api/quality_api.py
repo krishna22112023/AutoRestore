@@ -1,12 +1,11 @@
 import argparse
-import logging
-from pathlib import Path
-
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 import torch
 import pyiqa
+import logging
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
@@ -25,12 +24,12 @@ class IQARequest(BaseModel):
     metric: str
 
 
-def score(raw_image_path: str, proc_image_path: str, metric: str) -> float:
+def score(raw_image, proc_image, metric: str) -> float:
     """Compute the requested IQA *metric* for the given image(s).
 
-    For full-reference metrics (e.g. LPIPS) both *raw_image_path* and
-    *proc_image_path* are required.  For no-reference metrics (e.g. Q-Align,
-    BRISQUE) only *raw_image_path* is used.
+    For full-reference metrics (e.g. LPIPS) both *raw_image* and
+    *proc_image* are required.  For no-reference metrics (e.g. Q-Align,
+    BRISQUE) only *raw_image* is used.
     """
 
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -42,11 +41,11 @@ def score(raw_image_path: str, proc_image_path: str, metric: str) -> float:
         raise ValueError(f"Unsupported metric: {metric}") from e
 
     if metric_lower in {"lpips", "dists"}:  # full-reference metrics that need two images
-        if not proc_image_path:
+        if not proc_image:
             raise ValueError("proc_image_path must be provided for full-reference metrics like LPIPS/DISTS")
-        return float(iqa_metric(raw_image_path, proc_image_path).item())
+        return float(iqa_metric(raw_image, proc_image).item())
     else:  # no-reference metrics
-        return float(iqa_metric(raw_image_path).item())
+        return float(iqa_metric(raw_image).item())
 
 
 def create_app() -> FastAPI:
@@ -57,17 +56,23 @@ def create_app() -> FastAPI:
         """Compute the requested IQA metric and return it as JSON."""
 
         raw_path = payload.raw_image_path
+        raw_image = Image.open(raw_path)
         proc_path = payload.proc_image_path
+        if proc_path:
+            proc_image = Image.open(proc_path)
+            if raw_image.size != proc_image.size:
+                raw_image = raw_image.resize(proc_image.size, Image.LANCZOS)
+        else:
+            proc_image = None
         metric = payload.metric.lower()
 
         logger.info("Incoming IQA request | metric=%s, raw='%s', proc='%s'", metric, raw_path, proc_path)
-
         # Validate required arguments based on metric type
-        if metric in {"lpips", "dists"} and not proc_path:
+        if metric in {"lpips", "dists"} and not proc_image:
             raise HTTPException(status_code=400, detail="proc_image_path is required for full-reference metrics like lpips/dists")
 
         try:
-            result = score(raw_path, proc_path, metric)
+            result = score(raw_image, proc_image, metric)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
         except Exception as e:

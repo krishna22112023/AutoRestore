@@ -13,8 +13,8 @@ ROOT = settings.BASE
 BASE_YAML = ROOT / "config/base.yaml"
 RUN_SCRIPT = ROOT / "run.py"
 
-D3_ROOT = ROOT / "eval/data/d3"
-RESULTS_ROOT = ROOT / "eval/ablation_exp/d3"
+D3_ROOT = ROOT / "eval/MiOIR/d3/"
+RESULTS_ROOT = ROOT / "eval/results/d3"
 RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
 
 def load_experiment_names() -> List[str]:

@@ -41,9 +41,11 @@ def encode_file(file_path):
         encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
     return f"data:{mime_type};base64,{encoded_string}"
 
-def read_image(path: Union[str, Path]) -> np.ndarray:
+def read_image(path: Union[str, Path],normalize=False) -> np.ndarray:
     """Read an image from *path* as float32 BGR in [0, 1]."""
-    img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    img = cv2.imread(str(path))
     if img is None:
         raise FileNotFoundError(f"Could not read image: {path}")
-    return img.astype(np.float32) / 255.0
+    if normalize:
+        return img.astype(np.float32) / 255.0
+    return img

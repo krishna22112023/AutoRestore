@@ -49,18 +49,33 @@ def ensure_active_attempts(state: Dict[str, Dict[str, Dict[str, bool]]]) -> int:
     latest_lbl = current_attempt_label(state)
     latest_attempt = state[latest_lbl]
 
-    need_new_attempt = any(
-        flags["replan"] and all(
-            flags[k] for k in ("planner.batching", "planner.optimization", "executor", "verifier")
+    # Identify images that *completed* the full pipeline (all step flags True)
+    # **and** were marked for replanning. Only these should be retried.
+    imgs_to_retry = [
+        img
+        for img, flags in latest_attempt.items()
+        if flags["replan"]
+        and all(
+            flags[k]
+            for k in (
+                "planner.batching",
+                "planner.optimization",
+                "executor",
+                "verifier",
+            )
         )
-        for flags in latest_attempt.values()
-    )
+    ]
 
-    if need_new_attempt:
+    if imgs_to_retry:
         next_idx = int(latest_lbl.replace("attempt", "")) + 1
         next_lbl = f"attempt{next_idx}"
-        state[next_lbl] = {img: _empty_flags(replan=False) for img in latest_attempt.keys()}
+
+        # New attempt dictionary contains *only* the images that actually need
+        # to be retried. All other images are considered done and are **not**
+        # part of the new attempt, so they won't be re-processed.
+        state[next_lbl] = {img: _empty_flags(replan=False) for img in imgs_to_retry}
         return next_idx
+
     return int(latest_lbl.replace("attempt", ""))
 
 
@@ -75,6 +90,8 @@ def main(args):
 
     # General settings
     general_config = cfg.get("general", {})
+    verifier_config = cfg.get("verifier", {})
+    verifier_enable = verifier_config.get("enable", True)
     max_retries = int(general_config.get("max_retries", 3))
     artefacts_path = Path(root / general_config.get("artefacts_path", "data/artefacts"))
     data_path = Path(root / general_config.get("data_path", "data/raw"))
@@ -105,9 +122,17 @@ def main(args):
         logger.info("Loading existing state")
         state = read_json(state_path)
         attempt = ensure_active_attempts(state)
+        logger.info("Current attempt: %d", attempt)
         write_json(state, state_path)
     for att in range(attempt, max_retries + 1):
+        # Reload state and, *on every iteration*, ensure that a fresh attempt
+        # is opened whenever any image completed the full pipeline but has
+        # ``replan=True``. This guarantees that images marked for replanning
+        # are retried up to ``max_retries`` times.
         state = read_json(state_path)
+        attempt = ensure_active_attempts(state)  # may mutate *state*
+        write_json(state, state_path)
+
         to_process: List[str] = images_to_process(state)
         if not to_process:
             logger.info("All images successfully restored after %d iteration(s).", att - 1)
@@ -176,31 +201,28 @@ def main(args):
         t4 = time.perf_counter()
         verifier = Verifier(cfg)
         imgs_needing_ver = [img for img in to_process if not state[current_lbl][img]["verifier"]]
+        logger.info("Images needing verification: %s", imgs_needing_ver)
         if imgs_needing_ver:
-            failed_imgs = verifier.run()
+            failed_imgs = verifier.run(imgs_needing_ver)
         else:
             logger.info("Verification stage skipped. No images needing verification")
         ver_time = time.perf_counter() - t4        
 
-        # Inject speed entry into verify_IQA.json
-        inference_speed_path = artefacts_path / "inference_speed.json"
-        if inference_speed_path.exists():
-            try:
-                inference_speed_data = read_json(inference_speed_path)
-                speed_entry: Dict[str, Dict | float] = inference_speed_data.get(f"attempt{att}", {})
-
-                if imgs_needing_batching:
-                    speed_entry["planner.batching"] = round(iqa_time, 2)
-                if imgs_needing_opt:
-                    speed_entry["planner.optimization"] = round(bp_time, 2)
-                if imgs_needing_exec:
-                    speed_entry["executor"] = round(exec_time, 2)
-                if imgs_needing_ver:
-                    speed_entry["verifier"] = round(ver_time, 2)
-                write_json(inference_speed_data, inference_speed_path)
-            except Exception as e:
-                logger.error("Failed to write inference speed to %s: %s", inference_speed_path, e)
-
+        # save the inference speeds by attempt
+        try :
+            inference_speed_path = artefacts_path / "inference_speed.json"
+            inference_speed_data = {
+                f"attempt{att}": {
+                    "planner.batching": round(iqa_time, 2),
+                    "planner.optimization": round(bp_time, 2),
+                    "executor": round(exec_time, 2),
+                    "verifier": round(ver_time, 2)
+                }
+            }
+            write_json(inference_speed_data, inference_speed_path)
+        except Exception as e:
+            logger.error("Failed to write inference speed to %s: %s", inference_speed_path, e)
+            
         # Update state based on verification outcome
         for img in imgs_needing_ver:
             lbl = current_lbl

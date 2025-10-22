@@ -4,7 +4,7 @@
       "planner.batching": true,
       "planner.optimization": true,
       "executor": true,
-      "verifier": true,
+      "verifier": false,
       "replan": false
     }
   }

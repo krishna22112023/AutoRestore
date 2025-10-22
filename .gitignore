@@ -1,6 +1,8 @@
 .env
 .venv
 
-eval/data/**
+eval/MiOIR/**
+eval/UDC_T_OLED_val/**
+eval/DAWN/**
 data/** 
 logs/**

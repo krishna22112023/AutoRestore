@@ -1,8 +1,8 @@
 {
-  "attempt1": {
-    "planner.batching": 55.25,
-    "planner.optimization": 154.54,
-    "executor": 51.32,
-    "verifier": 27.81
+  "attempt3": {
+    "planner.batching": 5.78,
+    "planner.optimization": 96.77,
+    "executor": 22.26,
+    "verifier": 35.41
   }
 }

@@ -55,6 +55,7 @@ class Planning:
             ],
         )
         self.enable = planner_config.get("enable", True)
+        self.finetuned = planner_config.get("finetuned", False)
         self.max_degradations = iqa_config.get("max_degradations", 3)
         self._lambda = planner_config.get("score", {}).get("lambda", 0.5)
         self.optimize_pipeline = planner_config.get("optimize_pipeline", True)

@@ -41,7 +41,7 @@ lambda_0_3:
     planner: *planner_base
     executor: *executor_base
     verifier:
-      enable: false              # Skip verification
+      enable: true              # Skip verification
 
   planned_opt_with_verify:
     <<: *base_template
@@ -52,5 +52,13 @@ lambda_0_3:
     planner:
       <<: *planner_base
       lambda: 0
+    executor: *executor_base
+    verifier: *verifier_base
+
+  finetuned_planned_opt_verify:
+    general: *general_base
+    planner:
+      <<: *planner_base
+      lambda: 0.7
     executor: *executor_base
     verifier: *verifier_base
